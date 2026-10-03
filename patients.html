@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pasien &amp; Resep — Apotek Sehat Selalu</title>
+<link rel="stylesheet" href="css/style.css">
+<base target="_blank">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main">
+    <header class="topbar"><button class="burger" id="burger">☰</button><h1>🧑‍⚕️ Pasien &amp; Resep</h1></header>
+    <main class="content">
+      <div class="grid grid-2" style="align-items:start">
+        <div class="card">
+          <h3 id="pFormTitle">Tambah Pasien</h3>
+          <div class="field"><label>Nama Pasien *</label><input id="pNama" placeholder="Nama lengkap"></div>
+          <div class="form-row">
+            <div class="field"><label>Tgl Lahir</label><input id="pTgl" type="date"></div>
+            <div class="field"><label>Jenis Kelamin</label>
+              <select id="pJk"><option value="">—</option><option>L</option><option>P</option></select>
+            </div>
+            <div class="field"><label>Telepon</label><input id="pTelp" placeholder="08xx"></div>
+          </div>
+          <div class="field"><label>Alamat</label><textarea id="pAlamat" rows="2"></textarea></div>
+          <div class="field"><label>Alergi Obat</label><input id="pAlergi" placeholder="mis. penisilin"></div>
+          <button class="btn btn-primary" id="btnPSave">💾 Simpan Pasien</button>
+          <button class="btn btn-ghost" id="btnPReset" style="margin-left:.5rem">Batal</button>
+          <div class="tbl-wrap" style="margin-top:1rem"><table id="tblPasien"></table></div>
+        </div>
+
+        <div class="card" id="detailCard" style="display:none">
+          <h3 id="dTitle">Detail Pasien</h3>
+          <div id="dInfo"></div>
+
+          <h3 style="margin-top:1rem">➕ Catat Resep</h3>
+          <div class="form-row">
+            <div class="field"><label>Obat</label><input id="rObat" placeholder="nama obat & kekuatan"></div>
+            <div class="field"><label>Qty</label><input id="rQty" type="number" min="1" value="1"></div>
+          </div>
+          <div class="form-row">
+            <div class="field"><label>Dosis</label><input id="rDosis" type="number" min="0" step="0.5" value="1"></div>
+            <div class="field"><label>Frekuensi (/hari)</label><input id="rFreq" type="number" min="1" value="3"></div>
+            <div class="field"><label>Dokter</label><input id="rDokter" placeholder="dr. …"></div>
+          </div>
+          <div class="field"><label>Catatan</label><input id="rCatatan" placeholder="mis. habis bersama makan"></div>
+          <p id="rPreview" class="muted" style="font-size:.8rem;margin-bottom:.5rem"></p>
+          <button class="btn btn-primary" id="btnRSave">💾 Simpan Resep</button>
+
+          <h3 style="margin-top:1rem">📝 Riwayat Resep</h3>
+          <div class="tbl-wrap"><table id="tblResep"></table></div>
+
+          <h3 style="margin-top:1rem">🛒 Riwayat Pembelian</h3>
+          <div class="tbl-wrap"><table id="tblBeli"></table></div>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+<script type="module">
+import { guard, renderNav } from './js/auth.js';
+import { list, add, update, remove } from './js/db.js';
+import * as calc from './js/calculator.js';
+
+const s = guard('patients');
+if (s) { renderNav('patients'); init(); }
+
+let pasienList = [], resepList = [], trxList = [], selectedId = null, editingP = null;
+const tgl = (t) => t?.toDate ? t.toDate() : (t?.seconds ? new Date(t.seconds * 1000) : new Date(t || Date.now()));
+
+async function init() {
+  [pasienList, resepList, trxList] = await Promise.all([
+    list('pasien'), list('resep'), list('transaksi')
+  ]);
+  renderTable();
+  if (selectedId) loadDetail(selectedId);
+}
+
+function renderTable() {
+  document.getElementById('tblPasien').innerHTML =
+    '<tr><th>Nama</th><th>JK</th><th>Telepon</th><th>Aksi</th></tr>' +
+    pasienList.map(p => `<tr>
+      <td><b>${p.nama}</b>${p.alergi ? `<br><span class="badge danger">⚠ alergi: ${p.alergi}</span>` : ''}</td>
+      <td>${p.jk || '-'}</td><td>${p.telepon || '-'}</td>
+      <td>
+        <button class="btn btn-primary btn-sm" data-view="${p.id}">📂</button>
+        <button class="btn btn-primary btn-sm" data-edit="${p.id}">✏️</button>
+        <button class="btn btn-danger btn-sm" data-del="${p.id}">🗑</button>
+      </td></tr>`).join('');
+  document.querySelectorAll('[data-view]').forEach(b => b.onclick = () => loadDetail(b.dataset.view));
+  document.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => {
+    const p = pasienList.find(x => x.id === b.dataset.edit);
+    editingP = p.id;
+    pNama.value = p.nama || ''; pTgl.value = p.tanggalLahir || ''; pJk.value = p.jk || '';
+    pTelp.value = p.telepon || ''; pAlamat.value = p.alamat || ''; pAlergi.value = p.alergi || '';
+    document.getElementById('pFormTitle').textContent = 'Edit Pasien';
+  });
+  document.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
+    if (!confirm('Hapus pasien ini?')) return;
+    await remove('pasien', b.dataset.del);
+    if (selectedId === b.dataset.del) { selectedId = null; document.getElementById('detailCard').style.display = 'none'; }
+    init();
+  });
+}
+
+document.getElementById('btnPSave').onclick = async () => {
+  const data = {
+    nama: pNama.value.trim(), tanggalLahir: pTgl.value, jk: pJk.value,
+    telepon: pTelp.value.trim(), alamat: pAlamat.value.trim(), alergi: pAlergi.value.trim()
+  };
+  if (!data.nama) { alert('Nama pasien wajib diisi.'); return; }
+  if (editingP) await update('pasien', editingP, data);
+  else { data.dibuat = new Date().toISOString(); await add('pasien', data); }
+  editingP = null;
+  ['pNama','pTgl','pTelp','pAlamat','pAlergi'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('pFormTitle').textContent = 'Tambah Pasien';
+  init();
+};
+document.getElementById('btnPReset').onclick = () => {
+  editingP = null;
+  ['pNama','pTgl','pTelp','pAlamat','pAlergi'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('pFormTitle').textContent = 'Tambah Pasien';
+};
+
+function loadDetail(id) {
+  selectedId = id;
+  const p = pasienList.find(x => x.id === id);
+  document.getElementById('detailCard').style.display = 'block';
+  document.getElementById('dTitle').textContent = 'Detail: ' + p.nama;
+  document.getElementById('dInfo').innerHTML = `
+    <p style="font-size:.88rem">Tgl lahir: ${p.tanggalLahir || '-'} · JK: ${p.jk || '-'} · Telp: ${p.telepon || '-'}<br>
+    Alamat: ${p.alamat || '-'}<br>Alergi: ${p.alergi ? '<span class="badge danger">' + p.alergi + '</span>' : 'tidak ada'}</p>`;
+
+  const reseps = resepList.filter(r => r.pasienId === id).sort((a, b) => tgl(b.tanggal) - tgl(a.tanggal));
+  document.getElementById('tblResep').innerHTML =
+    '<tr><th>Tanggal</th><th>Obat</th><th>Signa</th><th>Dokter</th></tr>' +
+    (reseps.map(r => `<tr>
+      <td>${tgl(r.tanggal).toLocaleDateString('id-ID')}</td>
+      <td><b>${r.obatNama}</b> × ${r.qty}<br><span class="muted" style="font-size:.75rem">${r.catatan || ''}</span></td>
+      <td>${r.dosis} × ${r.frekuensi}/hari<br><span class="muted" style="font-size:.75rem">±${calc.hitungDurasiHabis(r.qty, calc.hitungDosisPerHari(r.dosis, r.frekuensi))} hari</span></td>
+      <td>${r.dokter || '-'}</td></tr>`).join('') || '<tr><td colspan="4" class="muted">Belum ada resep</td></tr>');
+
+  const beli = trxList.filter(t => t.tipe === 'penjualan' && t.pasienId === id)
+    .sort((a, b) => tgl(b.tanggal) - tgl(a.tanggal));
+  document.getElementById('tblBeli').innerHTML =
+    '<tr><th>No</th><th>Tanggal</th><th>Item</th><th>Total</th></tr>' +
+    (beli.map(t => `<tr>
+      <td>${t.noTransaksi}</td><td>${tgl(t.tanggal).toLocaleDateString('id-ID')}</td>
+      <td>${(t.items || []).map(i => i.nama + ' ×' + i.qty).join(', ')}</td>
+      <td>${calc.formatRupiah(t.total)}</td></tr>`).join('') || '<tr><td colspan="4" class="muted">Belum ada pembelian</td></tr>');
+}
+
+// Preview durasi resep
+function previewResep() {
+  const qty = +document.getElementById('rQty').value || 0;
+  const perHari = calc.hitungDosisPerHari(+document.getElementById('rDosis').value || 0, +document.getElementById('rFreq').value || 0);
+  document.getElementById('rPreview').textContent = perHari > 0
+    ? `Estimasi habis: ±${calc.hitungDurasiHabis(qty, perHari)} hari (${perHari}/hari)`
+    : 'Isi dosis & frekuensi untuk estimasi habis.';
+}
+['rQty', 'rDosis', 'rFreq'].forEach(id => document.getElementById(id).addEventListener('input', previewResep));
+previewResep();
+
+document.getElementById('btnRSave').onclick = async () => {
+  if (!selectedId) { alert('Pilih pasien dulu (ikon 📂).'); return; }
+  const data = {
+    pasienId: selectedId,
+    obatNama: document.getElementById('rObat').value.trim(),
+    qty: +document.getElementById('rQty').value || 1,
+    dosis: +document.getElementById('rDosis').value || 1,
+    frekuensi: +document.getElementById('rFreq').value || 1,
+    dokter: document.getElementById('rDokter').value.trim(),
+    catatan: document.getElementById('rCatatan').value.trim(),
+    tanggal: new Date().toISOString(), userId: s.uid
+  };
+  if (!data.obatNama) { alert('Nama obat wajib diisi.'); return; }
+  await add('resep', data);
+  ['rObat', 'rDokter', 'rCatatan'].forEach(id => document.getElementById(id).value = '');
+  init();
+};
+</script>
+</body>
+</html>
