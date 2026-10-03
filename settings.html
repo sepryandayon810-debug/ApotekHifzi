@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pengaturan Sistem — Apotek Sehat Selalu</title>
+<link rel="stylesheet" href="css/style.css">
+<base target="_blank">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main">
+    <header class="topbar"><button class="burger" id="burger">☰</button><h1>⚙️ Pengaturan Sistem</h1></header>
+    <main class="content">
+      <div class="card">
+        <h3>🏪 Profil Apotek <span class="muted" style="font-size:.75rem">(terapply ke SEMUA menu, header &amp; struk)</span></h3>
+        <div class="form-row">
+          <div class="field"><label>Nama Apotek</label><input id="prNama" placeholder="Apotek Sehat Selalu"></div>
+          <div class="field"><label>Telepon</label><input id="prTelp" placeholder="021-xxx"></div>
+          <div class="field"><label>Email</label><input id="prEmail" type="email"></div>
+        </div>
+        <div class="field"><label>Alamat</label><textarea id="prAlamat" rows="2"></textarea></div>
+        <div class="form-row">
+          <div class="field"><label>PPN % (global, dipakai semua menu)</label><input id="prPpn" type="number" min="0" value="11"></div>
+          <div class="field"><label>Margin Default % (obat &amp; pembelian baru)</label><input id="prMargin" type="number" min="0" value="20"></div>
+        </div>
+        <div class="field"><label>Footer Struk</label><input id="prFooter" placeholder="Terima kasih, semoga lekas sembuh!"></div>
+        <button class="btn btn-primary" id="btnProfil">💾 Simpan Profil</button>
+        <span id="profilMsg" class="muted" style="margin-left:.5rem;font-size:.85rem"></span>
+      </div>
+
+      <div class="card" id="cardUsers">
+        <h3>👥 Manajemen Pengguna &amp; Hak Akses <span class="muted" style="font-size:.75rem">(khusus Developer)</span></h3>
+        <div class="form-row">
+          <div class="field"><label>Nama</label><input id="uNama" placeholder="Nama staf"></div>
+          <div class="field"><label>Email (login)</label><input id="uEmail" type="email"></div>
+          <div class="field"><label>Password</label><input id="uPass" type="password" placeholder="min. 6 karakter"></div>
+          <div class="field"><label>Role</label>
+            <select id="uRole">
+              <option value="staff">Staff / Kasir — POS, pasien, kartu stok (lihat)</option>
+              <option value="admin">Admin — operasional, inventaris, opname, pemasok, laporan</option>
+              <option value="owner">Owner — + pengaturan, keuangan komprehensif</option>
+              <option value="developer">Developer — akses penuh termasuk pengguna</option>
+            </select>
+          </div>
+        </div>
+        <button class="btn btn-primary" id="btnUserAdd">➕ Tambah Pengguna</button>
+        <div class="tbl-wrap" style="margin-top:1rem"><table id="tblUsers"></table></div>
+      </div>
+    </main>
+  </div>
+</div>
+<script type="module">
+import { guard, renderNav, sha256, ROLE_LABEL } from './js/auth.js';
+import { list, add, update, remove, getOne } from './js/db.js';
+
+const s = guard('settings');
+if (s) { renderNav('settings'); init(); }
+
+async function init() {
+  const profil = await getOne('settings', 'profil');
+  if (profil) {
+    prNama.value = profil.namaApotek || ''; prTelp.value = profil.telepon || '';
+    prEmail.value = profil.email || ''; prAlamat.value = profil.alamat || '';
+    prPpn.value = profil.ppnPersen ?? 11; prMargin.value = profil.marginDefault ?? 20;
+    prFooter.value = profil.footerStruk || '';
+  }
+  // Manajemen pengguna: hanya Developer
+  if (s.role === 'developer') renderUsers();
+  else document.getElementById('cardUsers').style.display = 'none';
+}
+
+// simpan profil dengan merge ke doc 'profil'
+import { doc, setDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { db } from "./js/firebase-config.js";
+document.getElementById('btnProfil').onclick = async () => {
+  await setDoc(doc(db, 'settings', 'profil'), {
+    namaApotek: prNama.value.trim(), telepon: prTelp.value.trim(), email: prEmail.value.trim(),
+    alamat: prAlamat.value.trim(), ppnPersen: +prPpn.value || 11,
+    marginDefault: +prMargin.value || 20, footerStruk: prFooter.value.trim(),
+    diubah: new Date().toISOString(), diubahOleh: s.nama
+  }, { merge: true });
+  document.getElementById('profilMsg').textContent = '✅ Tersimpan — berlaku untuk semua menu.';
+};
+
+async function renderUsers() {
+  const users = await list('users');
+  document.getElementById('tblUsers').innerHTML =
+    '<tr><th>Nama</th><th>Email</th><th>Role</th><th>Status</th><th>Aksi</th></tr>' +
+    users.map(u => `<tr>
+      <td><b>${u.nama}</b></td><td>${u.email}</td>
+      <td><span class="badge info">${ROLE_LABEL[u.role] || u.role}</span></td>
+      <td><span class="badge ${u.aktif ? 'success' : 'danger'}">${u.aktif ? 'Aktif' : 'Nonaktif'}</span></td>
+      <td>
+        <button class="btn btn-primary btn-sm" data-toggle="${u.id}">${u.aktif ? 'Nonaktifkan' : 'Aktifkan'}</button>
+        ${u.id !== s.uid ? `<button class="btn btn-danger btn-sm" data-del="${u.id}">🗑</button>` : '<span class="muted" style="font-size:.75rem">(Anda)</span>'}
+      </td></tr>`).join('');
+  document.querySelectorAll('[data-toggle]').forEach(b => b.onclick = async () => {
+    const u = users.find(x => x.id === b.dataset.toggle);
+    await update('users', u.id, { aktif: !u.aktif });
+    renderUsers();
+  });
+  document.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
+    if (!confirm('Hapus pengguna ini?')) return;
+    await remove('users', b.dataset.del);
+    renderUsers();
+  });
+}
+
+document.getElementById('btnUserAdd').onclick = async () => {
+  const nama = uNama.value.trim(), email = uEmail.value.trim().toLowerCase(), pass = uPass.value;
+  if (!nama || !email || pass.length < 6) { alert('Lengkapi nama, email & password (min. 6).'); return; }
+  const users = await list('users');
+  if (users.some(u => u.email === email)) { alert('Email sudah terdaftar.'); return; }
+  await add('users', {
+    nama, email, password: await sha256(pass), role: uRole.value, aktif: true,
+    dibuat: new Date().toISOString(), dibuatOleh: s.nama
+  });
+  ['uNama','uEmail','uPass'].forEach(id => document.getElementById(id).value = '');
+  renderUsers();
+};
+</script>
+</body>
+</html>
