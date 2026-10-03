@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pemasok — Apotek Sehat Selalu</title>
+<link rel="stylesheet" href="css/style.css">
+<base target="_blank">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main">
+    <header class="topbar"><button class="burger" id="burger">☰</button><h1>🚚 Manajemen Pemasok</h1></header>
+    <main class="content">
+      <div class="grid grid-2" style="align-items:start">
+        <div class="card">
+          <h3 id="supTitle">Tambah Pemasok</h3>
+          <div class="field"><label>Nama Distributor *</label><input id="supNama" placeholder="PT Sumber Sehat"></div>
+          <div class="form-row">
+            <div class="field"><label>Kontak Person</label><input id="supKontak" placeholder="Budi"></div>
+            <div class="field"><label>Telepon</label><input id="supTelp" placeholder="021-xxx"></div>
+          </div>
+          <div class="field"><label>Email</label><input id="supEmail" type="email"></div>
+          <div class="field"><label>Alamat</label><textarea id="supAlamat" rows="2"></textarea></div>
+          <button class="btn btn-primary" id="btnSupSave">💾 Simpan Pemasok</button>
+          <button class="btn btn-ghost" id="btnSupReset" style="margin-left:.5rem">Batal</button>
+          <div class="tbl-wrap" style="margin-top:1rem"><table id="tblSup"></table></div>
+        </div>
+
+        <div class="card">
+          <h3>📥 Catat Pembelian Stok</h3>
+          <div class="field"><label>Pemasok</label><select id="poSup"></select></div>
+          <div class="form-row">
+            <div class="field"><label>Obat</label><select id="poObat"></select></div>
+            <div class="field"><label>Qty</label><input id="poQty" type="number" min="1" value="1"></div>
+            <div class="field"><label>Harga Beli /unit</label><input id="poHarga" type="number" min="0" value="0"></div>
+          </div>
+          <label style="font-size:.85rem;display:flex;gap:.4rem;align-items:center;margin-bottom:.75rem">
+            <input type="checkbox" id="poUpdateHpp" checked style="width:auto">
+            Perbarui HPP &amp; harga jual obat (dengan margin + PPN dari Pengaturan)
+          </label>
+          <p id="poPreview" class="muted" style="font-size:.85rem;margin-bottom:.5rem"></p>
+          <button class="btn btn-primary" id="btnPoSave">💾 Simpan Pembelian (PO)</button>
+
+          <h3 style="margin-top:1rem">🧾 Riwayat Pembelian</h3>
+          <div class="tbl-wrap"><table id="tblPo"></table></div>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+<script type="module">
+import { guard, renderNav } from './js/auth.js';
+import { list, add, update, remove, getOne, nextNumber } from './js/db.js';
+import * as calc from './js/calculator.js';
+
+const s = guard('suppliers');
+if (s) { renderNav('suppliers'); init(); }
+
+let supList = [], obatList = [], poList = [], editingSup = null, profil = { ppnPersen: 11, marginDefault: 20 };
+const tgl = (t) => t?.toDate ? t.toDate() : (t?.seconds ? new Date(t.seconds * 1000) : new Date(t || Date.now()));
+
+async function init() {
+  [supList, obatList, poList, profil] = await Promise.all([
+    list('suppliers'), list('obat'),
+    list('transaksi'), getOne('settings', 'profil')
+  ]);
+  profil = profil || {};
+  poList = poList.filter(t => t.tipe === 'pembelian');
+  renderSup(); renderPoForm(); previewPo();
+}
+
+function renderSup() {
+  document.getElementById('poSup').innerHTML = supList.map(x => `<option value="${x.id}">${x.nama}</option>`).join('');
+  document.getElementById('tblSup').innerHTML =
+    '<tr><th>Nama</th><th>Kontak</th><th>Telepon</th><th>Aksi</th></tr>' +
+    supList.map(x => `<tr>
+      <td><b>${x.nama}</b><br><span class="muted" style="font-size:.75rem">${x.alamat || ''}</span></td>
+      <td>${x.kontak || '-'}</td><td>${x.telepon || '-'}</td>
+      <td>
+        <button class="btn btn-primary btn-sm" data-edit="${x.id}">✏️</button>
+        <button class="btn btn-danger btn-sm" data-del="${x.id}">🗑</button>
+      </td></tr>`).join('');
+  document.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => {
+    const x = supList.find(o => o.id === b.dataset.edit);
+    editingSup = x.id;
+    supNama.value = x.nama || ''; supKontak.value = x.kontak || ''; supTelp.value = x.telepon || '';
+    supEmail.value = x.email || ''; supAlamat.value = x.alamat || '';
+    document.getElementById('supTitle').textContent = 'Edit Pemasok';
+  });
+  document.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
+    if (!confirm('Hapus pemasok ini?')) return;
+    await remove('suppliers', b.dataset.del);
+    init();
+  });
+}
+
+document.getElementById('btnSupSave').onclick = async () => {
+  const data = {
+    nama: supNama.value.trim(), kontak: supKontak.value.trim(), telepon: supTelp.value.trim(),
+    email: supEmail.value.trim(), alamat: supAlamat.value.trim()
+  };
+  if (!data.nama) { alert('Nama pemasok wajib diisi.'); return; }
+  if (editingSup) await update('suppliers', editingSup, data);
+  else { data.dibuat = new Date().toISOString(); await add('suppliers', data); }
+  editingSup = null;
+  ['supNama','supKontak','supTelp','supEmail','supAlamat'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('supTitle').textContent = 'Tambah Pemasok';
+  init();
+};
+document.getElementById('btnSupReset').onclick = () => {
+  editingSup = null;
+  ['supNama','supKontak','supTelp','supEmail','supAlamat'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('supTitle').textContent = 'Tambah Pemasok';
+};
+
+function renderPoForm() {
+  document.getElementById('poObat').innerHTML = obatList.map(o => `<option value="${o.id}">${o.nama}</option>`).join('');
+  document.getElementById('tblPo').innerHTML =
+    '<tr><th>No PO</th><th>Tanggal</th><th>Pemasok</th><th>Item</th><th>Total</th></tr>' +
+    (poList.sort((a, b) => tgl(b.tanggal) - tgl(a.tanggal)).slice(0, 15).map(t => `<tr>
+      <td>${t.noTransaksi}</td><td>${tgl(t.tanggal).toLocaleDateString('id-ID')}</td>
+      <td>${t.supplierNama || '-'}</td>
+      <td>${(t.items || []).map(i => i.nama + ' ×' + i.qty).join(', ')}</td>
+      <td>${calc.formatRupiah(t.total)}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">Belum ada pembelian</td></tr>');
+}
+
+function previewPo() {
+  const qty = +document.getElementById('poQty').value || 0;
+  const harga = +document.getElementById('poHarga').value || 0;
+  document.getElementById('poPreview').innerHTML =
+    `Total pembelian: <b>${calc.formatRupiah(qty * harga)}</b>` +
+    (document.getElementById('poUpdateHpp').checked
+      ? ` · Harga jual baru: <b>${calc.formatRupiah(calc.hitungHargaJual(harga, profil.marginDefault ?? 20, profil.ppnPersen ?? 11))}</b>`
+      : '');
+}
+['poQty', 'poHarga', 'poUpdateHpp'].forEach(id => document.getElementById(id).addEventListener('input', previewPo));
+
+document.getElementById('btnPoSave').onclick = async () => {
+  const obat = obatList.find(o => o.id === document.getElementById('poObat').value);
+  const sup = supList.find(x => x.id === document.getElementById('poSup').value);
+  if (!obat || !sup) { alert('Pilih pemasok & obat.'); return; }
+  const qty = +document.getElementById('poQty').value || 0;
+  const harga = +document.getElementById('poHarga').value || 0;
+  if (qty <= 0 || harga <= 0) { alert('Qty & harga beli harus lebih dari 0.'); return; }
+  try {
+    const no = await nextNumber('po', 'PO');
+    await add('transaksi', {
+      noTransaksi: no, tipe: 'pembelian', tanggal: new Date().toISOString(),
+      supplierId: sup.id, supplierNama: sup.nama,
+      items: [{ obatId: obat.id, nama: obat.nama, qty, harga, hpp: harga }],
+      subtotal: qty * harga, diskon: 0, ppn: 0, total: qty * harga,
+      userId: s.uid, userNama: s.nama
+    });
+    const saldoBaru = calc.hitungStokBaru(obat.stok, qty);
+    const updateData = { stok: saldoBaru };
+    if (document.getElementById('poUpdateHpp').checked) {
+      updateData.hpp = harga;
+      updateData.hargaJual = calc.hitungHargaJual(harga, profil.marginDefault ?? 20, profil.ppnPersen ?? 11);
+    }
+    await update('obat', obat.id, updateData);
+    await add('kartuStok', {
+      obatId: obat.id, tanggal: new Date().toISOString(), jenis: 'Pembelian',
+      masuk: qty, keluar: 0, saldo: saldoBaru, referensi: no,
+      keterangan: `PO dari ${sup.nama}`, userId: s.uid
+    });
+    alert('Pembelian tersimpan: ' + no + ' · stok bertambah ' + qty);
+    init();
+  } catch (err) { alert('Gagal: ' + err.message); }
+};
+</script>
+</body>
+</html>
