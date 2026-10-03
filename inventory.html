@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Inventaris &amp; Stok Opname — Apotek Sehat Selalu</title>
+<link rel="stylesheet" href="css/style.css">
+<base target="_blank">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main">
+    <header class="topbar"><button class="burger" id="burger">☰</button><h1>📦 Inventaris &amp; Stok Opname</h1></header>
+    <main class="content">
+      <div class="card">
+        <h3 id="formTitle">Tambah Obat Baru</h3>
+        <div class="form-row">
+          <div class="field"><label>Kode Obat</label><input id="fKode" placeholder="OBT-001"></div>
+          <div class="field"><label>Nama Obat *</label><input id="fNama" placeholder="Paracetamol 500mg"></div>
+          <div class="field"><label>Kategori</label><input id="fKategori" placeholder="Analgesik"></div>
+          <div class="field"><label>Satuan</label>
+            <select id="fSatuan"><option>strip</option><option>tablet</option><option>botol</option><option>tube</option><option>pcs</option><option>box</option></select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="field"><label>HPP / Harga Beli (Rp)</label><input id="fHpp" type="number" min="0" value="0"></div>
+          <div class="field"><label>Margin %</label><input id="fMargin" type="number" min="0" value="20"></div>
+          <div class="field"><label>Harga Jual (Rp)</label><input id="fHarga" type="number" min="0">
+            <span class="muted" style="font-size:.75rem" id="prevHarga"></span></div>
+          <div class="field"><label>Min. Stok</label><input id="fMinStok" type="number" min="0" value="10"></div>
+        </div>
+        <div class="form-row">
+          <div class="field"><label>Stok Awal</label><input id="fStok" type="number" min="0" value="0"></div>
+          <div class="field"><label>No. Batch</label><input id="fBatch" placeholder="BATCH-001"></div>
+          <div class="field"><label>Tgl Kedaluwarsa</label><input id="fExp" type="date"></div>
+          <div class="field"><label>Pemasok</label><select id="fSupplier"></select></div>
+        </div>
+        <button class="btn btn-primary" id="btnSave">💾 Simpan Obat</button>
+        <button class="btn btn-ghost" id="btnReset" style="margin-left:.5rem">Batal</button>
+      </div>
+
+      <div class="card">
+        <h3>Stok Opname (Penyesuaian Fisik)</h3>
+        <div class="form-row">
+          <div class="field"><label>Obat</label><select id="fOpObat"></select></div>
+          <div class="field"><label>Stok Fisik (hasil hitung)</label><input id="fOpFisik" type="number" min="0" value="0"></div>
+        </div>
+        <p id="opPreview" class="muted" style="margin-bottom:.75rem"></p>
+        <button class="btn btn-primary" id="btnOpSave">✅ Simpan Penyesuaian</button>
+        <p class="muted" style="font-size:.78rem;margin-top:.5rem">Selisih dicatat otomatis di <b>Kartu Stok Obat</b> sebagai bukti audit.</p>
+      </div>
+
+      <div class="card">
+        <h3>Daftar Obat</h3>
+        <div class="tbl-wrap"><table id="tblObat"></table></div>
+      </div>
+    </main>
+  </div>
+</div>
+<script type="module">
+import { guard, renderNav } from './js/auth.js';
+import { list, add, update, remove, getOne } from './js/db.js';
+import * as calc from './js/calculator.js';
+
+const s = guard('inventory');
+if (s) { renderNav('inventory'); init(); }
+
+let obatList = [], supplierList = [], editingId = null;
+let profil = { ppnPersen: 11, marginDefault: 20 };
+
+async function init() {
+  [obatList, supplierList, profil] = await Promise.all([
+    list('obat'), list('suppliers'), getOne('settings', 'profil')
+  ]);
+  profil = profil || {};
+  if (!editingId) document.getElementById('fMargin').value = profil.marginDefault ?? 20;
+  document.getElementById('fSupplier').innerHTML = '<option value="">—</option>' +
+    supplierList.map(x => `<option value="${x.id}">${x.nama}</option>`).join('');
+  renderTable(); renderOpnameOptions(); updateHarga();
+}
+
+// ---- Harga jual otomatis dari HPP + margin (calculator.js) ----
+function updateHarga() {
+  const hpp = +document.getElementById('fHpp').value || 0;
+  const m = +document.getElementById('fMargin').value || 0;
+  const h = calc.hitungHargaJual(hpp, m, profil.ppnPersen ?? 11);
+  document.getElementById('fHarga').value = h;
+  document.getElementById('prevHarga').textContent = 'Otomatis: HPP + margin ' + m + '% + PPN ' + (profil.ppnPersen ?? 11) + '% = ' + calc.formatRupiah(h);
+}
+['fHpp', 'fMargin'].forEach(id => document.getElementById(id).addEventListener('input', updateHarga));
+
+// ---- Simpan / Update obat ----
+document.getElementById('btnSave').onclick = async () => {
+  const data = {
+    kode: fKode.value.trim(), nama: fNama.value.trim(), kategori: fKategori.value.trim(),
+    satuan: fSatuan.value, hpp: +fHpp.value || 0, marginPersen: +fMargin.value || 0,
+    hargaJual: +fHarga.value || 0, minStok: +fMinStok.value || 0,
+    batch: fBatch.value.trim(), expDate: fExp.value, supplierId: fSupplier.value
+  };
+  if (!data.nama) { alert('Nama obat wajib diisi.'); return; }
+  try {
+    if (editingId) {
+      await update('obat', editingId, data);
+    } else {
+      data.stok = +fStok.value || 0;
+      data.dibuat = new Date().toISOString();
+      const ref = await add('obat', data);
+      if (data.stok > 0) {
+        await add('kartuStok', {
+          obatId: ref.id, tanggal: new Date().toISOString(), jenis: 'Stok Awal',
+          masuk: data.stok, keluar: 0, saldo: data.stok, referensi: '-',
+          keterangan: 'Input data obat', userId: s.uid
+        });
+      }
+    }
+    resetForm(); init();
+  } catch (err) { alert('Gagal menyimpan: ' + err.message); }
+};
+
+function resetForm() {
+  editingId = null;
+  ['fKode','fNama','fKategori','fHpp','fBatch','fExp'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('fStok').value = 0;
+  document.getElementById('fStok').disabled = false;
+  document.getElementById('fMinStok').value = 10;
+  document.getElementById('formTitle').textContent = 'Tambah Obat Baru';
+  document.getElementById('btnSave').textContent = '💾 Simpan Obat';
+}
+document.getElementById('btnReset').onclick = resetForm;
+
+// ---- Tabel obat ----
+function renderTable() {
+  document.getElementById('tblObat').innerHTML =
+    '<tr><th>Kode</th><th>Nama</th><th>Kategori</th><th>Harga Jual</th><th>Stok</th><th>Batch</th><th>Kedaluwarsa</th><th>Aksi</th></tr>' +
+    obatList.map(o => {
+      const st = calc.statusStok(o.stok, o.minStok);
+      const ex = calc.statusKedaluwarsa(o.expDate);
+      return `<tr>
+        <td>${o.kode || '-'}</td><td><b>${o.nama}</b></td><td>${o.kategori || '-'}</td>
+        <td>${calc.formatRupiah(o.hargaJual)}</td>
+        <td><b>${o.stok}</b> ${o.satuan || ''} <span class="muted">(min ${o.minStok})</span> <span class="badge ${st.kelas}">${st.label}</span></td>
+        <td>${o.batch || '-'}</td>
+        <td>${o.expDate || '-'} <span class="badge ${ex.kelas}">${ex.label}</span></td>
+        <td>
+          <button class="btn btn-primary btn-sm" data-edit="${o.id}">✏️</button>
+          <button class="btn btn-danger btn-sm" data-del="${o.id}">🗑</button>
+        </td></tr>`;
+    }).join('');
+  document.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => {
+    const o = obatList.find(x => x.id === b.dataset.edit);
+    editingId = o.id;
+    fKode.value = o.kode || ''; fNama.value = o.nama || ''; fKategori.value = o.kategori || '';
+    fSatuan.value = o.satuan || 'strip'; fHpp.value = o.hpp || 0; fMargin.value = o.marginPersen ?? 20;
+    fHarga.value = o.hargaJual || 0; fMinStok.value = o.minStok ?? 10;
+    fStok.value = o.stok || 0; fStok.disabled = true;
+    fBatch.value = o.batch || ''; fExp.value = o.expDate || ''; fSupplier.value = o.supplierId || '';
+    document.getElementById('formTitle').textContent = 'Edit Obat: ' + o.nama;
+    document.getElementById('btnSave').textContent = '💾 Update Obat';
+    updateHarga();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+  document.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
+    if (!confirm('Hapus obat ini beserta riwayat kartu stoknya?')) return;
+    const moves = (await list('kartuStok')).filter(m => m.obatId === b.dataset.del);
+    for (const m of moves) await remove('kartuStok', m.id);
+    await remove('obat', b.dataset.del);
+    init();
+  });
+}
+
+// ---- Opname ----
+function renderOpnameOptions() {
+  document.getElementById('fOpObat').innerHTML = obatList.map(o =>
+    `<option value="${o.id}">${o.nama} (stok sistem: ${o.stok})</option>`).join('');
+  previewOp();
+}
+document.getElementById('fOpObat').onchange = previewOp;
+document.getElementById('fOpFisik').oninput = previewOp;
+
+function previewOp() {
+  const o = obatList.find(x => x.id === document.getElementById('fOpObat').value);
+  if (!o) { document.getElementById('opPreview').textContent = 'Belum ada obat.'; return; }
+  const fisik = +document.getElementById('fOpFisik').value || 0;
+  const sel = calc.hitungSelisihOpname(o.stok, fisik);
+  document.getElementById('opPreview').innerHTML =
+    `Stok sistem: <b>${o.stok}</b> → Stok fisik: <b>${fisik}</b> · Selisih: ` +
+    `<b style="color:${sel < 0 ? 'var(--danger)' : 'var(--success)'}">${sel > 0 ? '+' : ''}${sel}</b> · ` +
+    `Nilai persediaan fisik: <b>${calc.formatRupiah(calc.hitungNilaiPersediaan(fisik, o.hpp))}</b>`;
+}
+
+document.getElementById('btnOpSave').onclick = async () => {
+  const o = obatList.find(x => x.id === document.getElementById('fOpObat').value);
+  if (!o) return;
+  const fisik = +document.getElementById('fOpFisik').value || 0;
+  const sel = calc.hitungSelisihOpname(o.stok, fisik);
+  if (sel === 0) { alert('Stok fisik sama dengan sistem. Tidak ada penyesuaian.'); return; }
+  if (!confirm(`Simpan penyesuaian ${o.nama}: selisih ${sel > 0 ? '+' : ''}${sel}?`)) return;
+  await update('obat', o.id, { stok: fisik });
+  await add('kartuStok', {
+    obatId: o.id, tanggal: new Date().toISOString(),
+    jenis: sel > 0 ? 'Opname (Surplus)' : 'Opname (Kurang)',
+    masuk: sel > 0 ? sel : 0, keluar: sel < 0 ? Math.abs(sel) : 0,
+    saldo: fisik, referensi: 'OPNAME',
+    keterangan: `Selisih opname oleh ${s.nama}`, userId: s.uid
+  });
+  alert('Penyesuaian tersimpan & tercatat di Kartu Stok Obat.');
+  init();
+};
+</script>
+</body>
+</html>
