@@ -1,1 +1,93 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dasbor — Apotek Sehat Selalu</title>
+<link rel="stylesheet" href="css/style.css">
+<base target="_blank">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main">
+    <header class="topbar"><button class="burger" id="burger">☰</button><h1>📊 Dasbor</h1></header>
+    <main class="content">
+      <div class="grid grid-4" id="stats"></div>
+      <div class="grid grid-2">
+        <div class="card"><h3>Omzet 7 Hari Terakhir</h3><div class="chart chart-wrap" id="chart"></div></div>
+        <div class="card"><h3>Transaksi Terbaru</h3><div class="tbl-wrap"><table id="tblTrx"></table></div></div>
+      </div>
+      <div class="grid grid-2">
+        <div class="card"><h3>⚠️ Stok Menipis</h3><div class="tbl-wrap"><table id="tblStok"></table></div></div>
+        <div class="card"><h3>⏳ Obat Kedaluwarsa / Hampir Kedaluwarsa</h3><div class="tbl-wrap"><table id="tblExp"></table></div></div>
+      </div>
+    </main>
+  </div>
+</div>
+<script type="module">
+import { guard, renderNav } from './js/auth.js';
+import { list } from './js/db.js';
+import * as calc from './js/calculator.js';
 
+const s = guard('dashboard');
+if (s) { renderNav('dashboard'); init(); }
+
+async function init() {
+  const [trx, obat] = await Promise.all([list('transaksi'), list('obat')]);
+  const jual = trx.filter(t => t.tipe === 'penjualan');
+  const today = new Date().toDateString();
+  const tgl = (t) => t?.toDate ? t.toDate() : (t?.seconds ? new Date(t.seconds * 1000) : new Date(t || Date.now()));
+
+  const jualToday = jual.filter(t => tgl(t.tanggal).toDateString() === today);
+  const omzetToday = jualToday.reduce((a, t) => a + calc.toNumber(t.total), 0);
+  const menipis = obat.filter(o => calc.statusStok(o.stok, o.minStok).kode !== 'aman');
+  const expd = obat.filter(o => calc.statusKedaluwarsa(o.expDate).kode !== 'aman');
+
+  document.getElementById('stats').innerHTML = `
+    <div class="card stat"><span class="label">Omzet Hari Ini</span><span class="value">${calc.formatRupiah(omzetToday)}</span><span class="sub">${jualToday.length} transaksi</span></div>
+    <div class="card stat"><span class="label">Transaksi Hari Ini</span><span class="value">${jualToday.length}</span><span class="sub">semua kasir</span></div>
+    <div class="card stat"><span class="label">Stok Menipis</span><span class="value" style="color:var(--warning)">${menipis.length}</span><span class="sub">perlu restock</span></div>
+    <div class="card stat"><span class="label">Kedaluwarsa ≤ 30 hari</span><span class="value" style="color:var(--danger)">${expd.length}</span><span class="sub">butuh tindakan</span></div>`;
+
+  // Grafik batang 7 hari
+  const days = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(); d.setDate(d.getDate() - i);
+    days.push({
+      d,
+      v: jual.filter(t => tgl(t.tanggal).toDateString() === d.toDateString())
+             .reduce((a, t) => a + calc.toNumber(t.total), 0)
+    });
+  }
+  const max = Math.max(...days.map(x => x.v), 1);
+  document.getElementById('chart').innerHTML = days.map(x => `
+    <div class="bar" style="height:${Math.max(4, Math.round(x.v / max * 100))}%" title="${calc.formatRupiah(x.v)}">
+      <span>${x.d.toLocaleDateString('id-ID', { weekday: 'short' })}</span>
+    </div>`).join('');
+
+  // Transaksi terbaru
+  const recent = [...jual].sort((a, b) => tgl(b.tanggal) - tgl(a.tanggal)).slice(0, 5);
+  document.getElementById('tblTrx').innerHTML =
+    '<tr><th>No</th><th>Waktu</th><th>Total</th></tr>' +
+    (recent.map(t => `<tr><td>${t.noTransaksi}</td><td>${tgl(t.tanggal).toLocaleString('id-ID')}</td><td>${calc.formatRupiah(t.total)}</td></tr>`).join('') || '<tr><td colspan="3" class="muted">Belum ada transaksi</td></tr>');
+
+  // Stok menipis
+  document.getElementById('tblStok').innerHTML =
+    '<tr><th>Obat</th><th>Stok</th><th>Min</th><th>Status</th></tr>' +
+    (menipis.slice(0, 8).map(o => {
+      const st = calc.statusStok(o.stok, o.minStok);
+      return `<tr><td>${o.nama}</td><td>${o.stok} ${o.satuan || ''}</td><td>${o.minStok}</td><td><span class="badge ${st.kelas}">${st.label}</span></td></tr>`;
+    }).join('') || '<tr><td colspan="4" class="muted">Stok aman semua 🎉</td></tr>');
+
+  // Kedaluwarsa
+  document.getElementById('tblExp').innerHTML =
+    '<tr><th>Obat</th><th>Batch</th><th>Kedaluwarsa</th><th>Status</th></tr>' +
+    (expd.slice(0, 8).map(o => {
+      const st = calc.statusKedaluwarsa(o.expDate);
+      return `<tr><td>${o.nama}</td><td>${o.batch || '-'}</td><td>${o.expDate || '-'}</td><td><span class="badge ${st.kelas}">${st.label}</span></td></tr>`;
+    }).join('') || '<tr><td colspan="4" class="muted">Tidak ada obat mendekati kedaluwarsa</td></tr>');
+}
+</script>
+</body>
+</html>
