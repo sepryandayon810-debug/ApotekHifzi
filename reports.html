@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Laporan Keuangan — Apotek Sehat Selalu</title>
+<link rel="stylesheet" href="css/style.css">
+<base target="_blank">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main">
+    <header class="topbar"><button class="burger" id="burger">☰</button><h1>📈 Laporan Keuangan &amp; Penjualan</h1></header>
+    <main class="content">
+      <div class="card">
+        <div class="form-row" style="align-items:end">
+          <div class="field"><label>Dari Tanggal</label><input id="fFrom" type="date"></div>
+          <div class="field"><label>Sampai Tanggal</label><input id="fTo" type="date"></div>
+          <div class="field"><label>&nbsp;</label><button class="btn btn-primary" id="btnLoad" style="width:100%">🔍 Tampilkan</button></div>
+        </div>
+      </div>
+      <div class="grid grid-4" id="stats"></div>
+      <div class="grid grid-2">
+        <div class="card">
+          <h3>Rekap per Hari</h3>
+          <div class="tbl-wrap"><table id="tblHari"></table></div>
+        </div>
+        <div class="card">
+          <h3>Ringkasan Laba-Rugi</h3>
+          <div id="labaRugi"></div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Detail Transaksi Penjualan</h3>
+        <div class="tbl-wrap"><table id="tblTrx"></table></div>
+      </div>
+      <div class="card">
+        <h3>Pembelian Stok (periode sama)</h3>
+        <div class="tbl-wrap"><table id="tblBeli"></table></div>
+      </div>
+    </main>
+  </div>
+</div>
+<script type="module">
+import { guard, renderNav } from './js/auth.js';
+import { list } from './js/db.js';
+import * as calc from './js/calculator.js';
+
+const s = guard('reports');
+if (s) { renderNav('reports'); init(); }
+
+const tgl = (t) => t?.toDate ? t.toDate() : (t?.seconds ? new Date(t.seconds * 1000) : new Date(t || Date.now()));
+const rp = calc.formatRupiah;
+
+async function init() {
+  const now = new Date();
+  document.getElementById('fFrom').value = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+  document.getElementById('fTo').value = now.toISOString().slice(0, 10);
+  await load();
+}
+document.getElementById('btnLoad').onclick = load;
+
+async function load() {
+  const from = new Date(document.getElementById('fFrom').value); from.setHours(0, 0, 0);
+  const to = new Date(document.getElementById('fTo').value); to.setHours(23, 59, 59);
+  const trx = await list('transaksi');
+  const jual = trx.filter(t => t.tipe === 'penjualan' && (d => d >= from && d <= to)(tgl(t.tanggal)));
+  const beli = trx.filter(t => t.tipe === 'pembelian' && (d => d >= from && d <= to)(tgl(t.tanggal)));
+
+  const omzet = jual.reduce((a, t) => a + calc.toNumber(t.total), 0);
+  const hppTotal = jual.reduce((a, t) => a + (t.items || []).reduce((x, i) => x + calc.toNumber(i.hpp) * calc.toNumber(i.qty), 0), 0);
+  const dppTotal = jual.reduce((a, t) => a + (calc.toNumber(t.subtotal) - calc.toNumber(t.diskon)), 0);
+  const ppnTotal = jual.reduce((a, t) => a + calc.toNumber(t.ppn), 0);
+  const labaKotor = dppTotal - hppTotal;
+  const pembelian = beli.reduce((a, t) => a + calc.toNumber(t.total), 0);
+
+  document.getElementById('stats').innerHTML = `
+    <div class="card stat"><span class="label">Omzet (termasuk PPN)</span><span class="value">${rp(omzet)}</span><span class="sub">${jual.length} transaksi</span></div>
+    <div class="card stat"><span class="label">Laba Kotor</span><span class="value" style="color:${labaKotor >= 0 ? 'var(--success)' : 'var(--danger)'}">${rp(labaKotor)}</span><span class="sub">DPP − HPP</span></div>
+    <div class="card stat"><span class="label">Total Pembelian Stok</span><span class="value">${rp(pembelian)}</span><span class="sub">${beli.length} nota</span></div>
+    <div class="card stat"><span class="label">Rata-rata / Transaksi</span><span class="value">${rp(jual.length ? omzet / jual.length : 0)}</span><span class="sub">basket size</span></div>`;
+
+  // Rekap per hari
+  const perHari = {};
+  jual.forEach(t => {
+    const k = tgl(t.tanggal).toLocaleDateString('id-ID');
+    perHari[k] = perHari[k] || { omzet: 0, trx: 0, laba: 0 };
+    perHari[k].omzet += calc.toNumber(t.total);
+    perHari[k].trx++;
+    perHari[k].laba += (calc.toNumber(t.subtotal) - calc.toNumber(t.diskon)) -
+      (t.items || []).reduce((x, i) => x + calc.toNumber(i.hpp) * calc.toNumber(i.qty), 0);
+  });
+  document.getElementById('tblHari').innerHTML =
+    '<tr><th>Tanggal</th><th>Trx</th><th>Omzet</th><th>Laba</th></tr>' +
+    Object.entries(perHari).map(([k, v]) =>
+      `<tr><td>${k}</td><td>${v.trx}</td><td>${rp(v.omzet)}</td><td>${rp(v.laba)}</td></tr>`).join('');
+
+  // Laba-rugi sederhana
+  document.getElementById('labaRugi').innerHTML = `
+    <table style="font-size:.9rem">
+      <tr><td>Penjualan (DPP)</td><td style="text-align:right"><b>${rp(dppTotal)}</b></td></tr>
+      <tr><td>HPP / Pembelian terjual</td><td style="text-align:right">(${rp(hppTotal)})</td></tr>
+      <tr><td><b>Laba Kotor</b></td><td style="text-align:right"><b style="color:${labaKotor >= 0 ? 'var(--success)' : 'var(--danger)'}">${rp(labaKotor)}</b></td></tr>
+      <tr><td colspan="2"><hr style="border:none;border-top:1px solid var(--border)"></td></tr>
+      <tr><td>PPN terkumpul (disetor)</td><td style="text-align:right">${rp(ppnTotal)}</td></tr>
+      <tr><td>Pembelian stok periode ini</td><td style="text-align:right">(${rp(pembelian)})</td></tr>
+    </table>`;
+
+  // Detail transaksi
+  document.getElementById('tblTrx').innerHTML =
+    '<tr><th>No</th><th>Tanggal</th><th>Kasir</th><th>Pasien</th><th>Item</th><th>Total</th></tr>' +
+    (jual.sort((a, b) => tgl(b.tanggal) - tgl(a.tanggal)).map(t => `<tr>
+      <td>${t.noTransaksi}</td><td>${tgl(t.tanggal).toLocaleString('id-ID')}</td>
+      <td>${t.userNama || '-'}</td><td>${t.namaPasien || 'Umum'}</td>
+      <td>${(t.items || []).map(i => i.nama + ' ×' + i.qty).join(', ')}</td>
+      <td>${rp(t.total)}</td></tr>`).join('') || '<tr><td colspan="6" class="muted">Tidak ada transaksi pada periode ini</td></tr>');
+
+  document.getElementById('tblBeli').innerHTML =
+    '<tr><th>No PO</th><th>Tanggal</th><th>Pemasok</th><th>Item</th><th>Total</th></tr>' +
+    (beli.sort((a, b) => tgl(b.tanggal) - tgl(a.tanggal)).map(t => `<tr>
+      <td>${t.noTransaksi}</td><td>${tgl(t.tanggal).toLocaleDateString('id-ID')}</td>
+      <td>${t.supplierNama || '-'}</td>
+      <td>${(t.items || []).map(i => i.nama + ' ×' + i.qty).join(', ')}</td>
+      <td>${rp(t.total)}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">Tidak ada pembelian pada periode ini</td></tr>');
+}
+</script>
+</body>
+</html>
