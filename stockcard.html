@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kartu Stok Obat — Apotek Sehat Selalu</title>
+<link rel="stylesheet" href="css/style.css">
+<base target="_blank">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main">
+    <header class="topbar"><button class="burger" id="burger">☰</button><h1>🧾 Kartu Stok Obat</h1></header>
+    <main class="content">
+      <div class="card">
+        <h3>Apa ini?</h3>
+        <p style="font-size:.9rem;line-height:1.6">
+          <b>Kartu Stok Obat</b> adalah lembar mutasi persediaan untuk setiap obat — semacam "rekening koran" stok.
+          Setiap barang <b>masuk</b> (pembelian, stok awal, surplus opname) dan <b>keluar</b> (penjualan, selisih opname)
+          dicatat beserta <b>saldo berjalan</b>, nomor referensi (nota/PO), dan petugas yang bertanggung jawab.
+        </p>
+        <p style="font-size:.9rem;line-height:1.6;margin-top:.4rem">
+          Fungsinya: (1) jejak audit saat <b>stok opname</b>, (2) pelacakan <b>batch &amp; kedaluwarsa</b>,
+          (3) investigasi <b>selisih stok</b> / kehilangan, (4) dokumen pendukung administrasi apotek &amp; pemeriksaan BPOM.
+          Di sistem ini kartu stok terisi <b>otomatis</b> setiap transaksi di POS, pembelian, dan opname.
+        </p>
+      </div>
+
+      <div class="card">
+        <div class="form-row" style="align-items:end">
+          <div class="field"><label>Pilih Obat</label><select id="fObat"></select></div>
+          <div class="field"><label>Dari Tanggal</label><input id="fFrom" type="date"></div>
+          <div class="field"><label>Sampai</label><input id="fTo" type="date"></div>
+          <div class="field"><label>&nbsp;</label><button class="btn btn-primary" id="btnPrint" style="width:100%">🖨️ Cetak Kartu</button></div>
+        </div>
+      </div>
+
+      <div class="card" id="infoCard" style="display:none">
+        <div id="infoObat"></div>
+      </div>
+
+      <div class="card">
+        <h3>Mutasi Stok</h3>
+        <div class="tbl-wrap"><table id="tblMutasi"></table></div>
+        <p id="emptyMsg" class="muted" style="margin-top:.5rem">Pilih obat untuk melihat mutasi stoknya.</p>
+      </div>
+    </main>
+  </div>
+</div>
+<div id="printArea"></div>
+<script type="module">
+import { guard, renderNav, getSession } from './js/auth.js';
+import { list } from './js/db.js';
+import * as calc from './js/calculator.js';
+
+const s = guard('stockcard');
+if (s) { renderNav('stockcard'); init(); }
+
+let obatList = [], moves = [];
+const tgl = (t) => t?.toDate ? t.toDate() : (t?.seconds ? new Date(t.seconds * 1000) : new Date(t || Date.now()));
+
+async function init() {
+  obatList = await list('obat');
+  document.getElementById('fObat').innerHTML =
+    '<option value="">— pilih obat —</option>' +
+    obatList.map(o => `<option value="${o.id}">${o.nama}</option>`).join('');
+}
+
+document.getElementById('fObat').onchange = loadCard;
+document.getElementById('fFrom').oninput = renderTable;
+document.getElementById('fTo').oninput = renderTable;
+
+async function loadCard() {
+  const id = document.getElementById('fObat').value;
+  if (!id) { document.getElementById('infoCard').style.display = 'none'; renderTable(); return; }
+  const o = obatList.find(x => x.id === id);
+  moves = (await list('kartuStok')).filter(m => m.obatId === id)
+    .sort((a, b) => tgl(a.tanggal) - tgl(b.tanggal));
+  const ex = calc.statusKedaluwarsa(o.expDate);
+  document.getElementById('infoCard').style.display = 'block';
+  document.getElementById('infoObat').innerHTML = `
+    <div class="grid grid-3">
+      <div><span class="muted" style="font-size:.8rem">Obat</span><br><b style="font-size:1.1rem">${o.nama}</b>
+        <br><span class="muted" style="font-size:.8rem">${o.kode || '-'} · Batch ${o.batch || '-'}</span></div>
+      <div><span class="muted" style="font-size:.8rem">Kedaluwarsa</span><br><b>${o.expDate || '-'}</b>
+        <br><span class="badge ${ex.kelas}">${ex.label}</span></div>
+      <div><span class="muted" style="font-size:.8rem">Stok Sekarang / Nilai Persediaan</span><br>
+        <b style="font-size:1.1rem">${o.stok} ${o.satuan || ''}</b>
+        <br><span class="muted" style="font-size:.8rem">${calc.formatRupiah(calc.hitungNilaiPersediaan(o.stok, o.hpp))} (HPP)</span></div>
+    </div>`;
+  renderTable();
+}
+
+function renderTable() {
+  const id = document.getElementById('fObat').value;
+  const from = document.getElementById('fFrom').value;
+  const to = document.getElementById('fTo').value;
+  let rows = moves;
+  if (from) rows = rows.filter(m => tgl(m.tanggal) >= new Date(from));
+  if (to) { const t = new Date(to); t.setHours(23, 59, 59); rows = rows.filter(m => tgl(m.tanggal) <= t); }
+  document.getElementById('emptyMsg').style.display = rows.length ? 'none' : 'block';
+  document.getElementById('tblMutasi').innerHTML =
+    '<tr><th>Tanggal</th><th>Jenis Mutasi</th><th>Masuk</th><th>Keluar</th><th>Saldo</th><th>Referensi</th><th>Keterangan</th><th>Petugas</th></tr>' +
+    rows.map(m => `<tr>
+      <td>${tgl(m.tanggal).toLocaleString('id-ID')}</td>
+      <td><b>${m.jenis}</b></td>
+      <td style="color:var(--success)">${m.masuk || 0}</td>
+      <td style="color:var(--danger)">${m.keluar || 0}</td>
+      <td><b>${m.saldo}</b></td>
+      <td>${m.referensi || '-'}</td>
+      <td>${m.keterangan || '-'}</td>
+      <td>${(m.userId || '').slice(0, 6) || '-'}</td>
+    </tr>`).join('');
+}
+
+document.getElementById('btnPrint').onclick = () => {
+  const id = document.getElementById('fObat').value;
+  if (!id) { alert('Pilih obat dulu.'); return; }
+  const o = obatList.find(x => x.id === id);
+  document.getElementById('printArea').innerHTML = `
+    <div style="font-family:monospace;font-size:.85rem">
+      <h3 style="text-align:center">KARTU STOK OBAT</h3>
+      <p><b>${o.nama}</b> · ${o.kode || '-'} · Batch ${o.batch || '-'} · Kedaluwarsa ${o.expDate || '-'}<br>
+      Dicetak: ${new Date().toLocaleString('id-ID')} · Petugas: ${s.nama}</p>
+      ${document.getElementById('tblMutasi').outerHTML}
+      <p>Saldo akhir: <b>${o.stok} ${o.satuan || ''}</b> · Nilai persediaan (HPP): ${calc.formatRupiah(calc.hitungNilaiPersediaan(o.stok, o.hpp))}</p>
+    </div>`;
+  window.print();
+};
+</script>
+</body>
+</html>
