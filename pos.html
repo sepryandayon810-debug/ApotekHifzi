@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kasir / POS — Apotek Sehat Selalu</title>
+<link rel="stylesheet" href="css/style.css">
+<base target="_blank">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main">
+    <header class="topbar"><button class="burger" id="burger">☰</button><h1>💵 Kasir / POS</h1></header>
+    <main class="content">
+      <div class="pos-layout">
+        <div class="card">
+          <h3>Cari Obat</h3>
+          <input id="search" placeholder="Ketik nama / kode obat…">
+          <div class="search-results" id="results"></div>
+        </div>
+        <div class="card">
+          <h3>Keranjang Belanja</h3>
+          <div class="tbl-wrap"><table id="tblCart"></table></div>
+          <div class="form-row" style="margin-top:.75rem">
+            <div class="field"><label>Pasien (opsional)</label><select id="pasien"></select></div>
+            <div class="field"><label>Dokter (resep)</label><input id="dokter" placeholder="dr. …"></div>
+          </div>
+          <div class="form-row">
+            <div class="field"><label>Diskon %</label><input id="diskon" type="number" value="0" min="0"></div>
+            <div class="field"><label>PPN %</label><input id="ppn" type="number" readonly></div>
+          </div>
+          <div id="totals" style="margin:.5rem 0"></div>
+          <div class="form-row">
+            <div class="field"><label>Uang Bayar (Rp)</label><input id="bayar" type="number" min="0"></div>
+            <div class="field"><label>Kembalian</label><input id="kembalian" readonly></div>
+          </div>
+          <button class="btn btn-primary btn-block" id="btnSimpan">💾 Simpan &amp; Cetak Struk</button>
+          <div id="alertPos" style="margin-top:.5rem"></div>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+<div id="printArea"></div>
+<script type="module">
+import { guard, renderNav } from './js/auth.js';
+import { list, add, update, getOne, nextNumber } from './js/db.js';
+import * as calc from './js/calculator.js';
+
+const s = guard('pos');
+if (s) { renderNav('pos'); init(); }
+
+let obatList = [], pasienList = [], cart = [], profil = { ppnPersen: 11 };
+
+async function init() {
+  [obatList, pasienList, profil] = await Promise.all([
+    list('obat'), list('pasien'), getOne('settings', 'profil')
+  ]);
+  profil = profil || { ppnPersen: 11 };
+  document.getElementById('ppn').value = profil.ppnPersen ?? 11;
+  document.getElementById('pasien').innerHTML =
+    '<option value="">— Umum —</option>' +
+    pasienList.map(p => `<option value="${p.id}">${p.nama}</option>`).join('');
+  renderResults(''); renderCart();
+}
+
+document.getElementById('search').addEventListener('input', e => renderResults(e.target.value));
+
+function renderResults(q) {
+  q = q.toLowerCase();
+  const rows = obatList
+    .filter(o => o.nama.toLowerCase().includes(q) || (o.kode || '').toLowerCase().includes(q))
+    .slice(0, 60);
+  document.getElementById('results').innerHTML = rows.map(o => {
+    const st = calc.statusStok(o.stok, o.minStok);
+    return `<div class="result-item" data-id="${o.id}">
+      <div><b>${o.nama}</b> <span class="muted">· ${o.kode || '-'}</span><br>
+      <span class="muted" style="font-size:.8rem">${calc.formatRupiah(o.hargaJual)} · stok ${o.stok} ${o.satuan || ''}</span></div>
+      <span class="badge ${st.kelas}">${st.label}</span></div>`;
+  }).join('') || '<p class="muted">Obat tidak ditemukan.</p>';
+  document.querySelectorAll('.result-item').forEach(el => el.onclick = () => addToCart(el.dataset.id));
+}
+
+function addToCart(id) {
+  const o = obatList.find(x => x.id === id);
+  if (!o) return;
+  if (calc.toNumber(o.stok) <= 0) { alert('Stok habis!'); return; }
+  const ex = cart.find(c => c.obatId === id);
+  if (ex) {
+    if (ex.qty + 1 > o.stok) { alert('Melebihi stok tersedia (' + o.stok + ')'); return; }
+    ex.qty++;
+  } else {
+    cart.push({ obatId: o.id, nama: o.nama, harga: o.hargaJual, hpp: o.hpp || 0, qty: 1, stok: o.stok });
+  }
+  renderCart();
+}
+
+function renderCart() {
+  const tbl = document.getElementById('tblCart');
+  tbl.innerHTML = '<tr><th>Obat</th><th>Qty</th><th>Harga</th><th>Subtotal</th><th></th></tr>' +
+    cart.map((c, i) => `<tr>
+      <td>${c.nama}</td>
+      <td><input type="number" min="1" max="${c.stok}" value="${c.qty}" data-i="${i}" class="qty" style="width:64px"></td>
+      <td>${calc.formatRupiah(c.harga)}</td>
+      <td>${calc.formatRupiah(c.harga * c.qty)}</td>
+      <td><button class="btn btn-danger btn-sm" data-i="${i}">✕</button></td></tr>`).join('');
+  tbl.querySelectorAll('.qty').forEach(inp => inp.onchange = () => {
+    const i = +inp.dataset.i;
+    cart[i].qty = Math.max(1, Math.min(cart[i].stok, +inp.value || 1));
+    renderCart();
+  });
+  tbl.querySelectorAll('.btn-danger').forEach(b => b.onclick = () => { cart.splice(+b.dataset.i, 1); renderCart(); });
+  renderTotals();
+}
+
+const totals = () => calc.hitungTotalTransaksi(cart, {
+  diskonPersen: +document.getElementById('diskon').value || 0,
+  ppnPersen: profil.ppnPersen ?? 11
+});
+
+function renderTotals() {
+  const t = totals();
+  document.getElementById('totals').innerHTML = `
+    <div style="display:flex;justify-content:space-between;font-size:.9rem"><span>Subtotal</span><b>${calc.formatRupiah(t.subtotal)}</b></div>
+    <div style="display:flex;justify-content:space-between;font-size:.9rem"><span>Diskon</span><b>-${calc.formatRupiah(t.diskon)}</b></div>
+    <div style="display:flex;justify-content:space-between;font-size:.9rem"><span>PPN ${profil.ppnPersen ?? 11}%</span><b>${calc.formatRupiah(t.ppn)}</b></div>
+    <hr style="margin:.4rem 0;border:none;border-top:1px solid var(--border)">
+    <div style="display:flex;justify-content:space-between;font-size:1.15rem"><span><b>TOTAL</b></span><b>${calc.formatRupiah(t.total)}</b></div>`;
+  const bayar = +document.getElementById('bayar').value || 0;
+  document.getElementById('kembalian').value = calc.formatRupiah(Math.max(0, calc.hitungKembalian(bayar, t.total)));
+}
+['diskon', 'bayar'].forEach(id => document.getElementById(id).addEventListener('input', renderTotals));
+
+document.getElementById('btnSimpan').onclick = async () => {
+  const al = document.getElementById('alertPos');
+  al.innerHTML = '';
+  if (!cart.length) { al.innerHTML = '<span class="badge danger">Keranjang masih kosong.</span>'; return; }
+  const t = totals();
+  const bayar = +document.getElementById('bayar').value || 0;
+  if (bayar < t.total) { al.innerHTML = '<span class="badge danger">Uang bayar kurang dari total.</span>'; return; }
+  const btn = document.getElementById('btnSimpan');
+  btn.disabled = true; btn.textContent = 'Menyimpan…';
+  try {
+    const no = await nextNumber('trx', 'TRX');
+    const pasienId = document.getElementById('pasien').value;
+    const namaPasien = pasienId ? (pasienList.find(p => p.id === pasienId) || {}).nama : '';
+    const dokter = document.getElementById('dokter').value.trim();
+    await add('transaksi', {
+      noTransaksi: no, tipe: 'penjualan', tanggal: new Date().toISOString(),
+      items: cart.map(c => ({ obatId: c.obatId, nama: c.nama, qty: c.qty, harga: c.harga, hpp: c.hpp })),
+      subtotal: t.subtotal, diskon: t.diskon, ppn: t.ppn, total: t.total,
+      bayar, kembalian: calc.hitungKembalian(bayar, t.total),
+      pasienId, namaPasien, dokter,
+      userId: s.uid, userNama: s.nama
+    });
+    for (const c of cart) {
+      const o = obatList.find(x => x.id === c.obatId);
+      const saldoBaru = calc.hitungStokBaru(o.stok, -c.qty);
+      await update('obat', c.obatId, { stok: saldoBaru });
+      await add('kartuStok', {
+        obatId: c.obatId, tanggal: new Date().toISOString(), jenis: 'Penjualan',
+        masuk: 0, keluar: c.qty, saldo: saldoBaru, referensi: no,
+        keterangan: `Kasir: ${s.nama}${dokter ? ' · Resep ' + dokter : ''}`, userId: s.uid
+      });
+    }
+    cetakStruk(no, t, bayar, namaPasien, dokter);
+    cart = [];
+    document.getElementById('bayar').value = '';
+    document.getElementById('dokter').value = '';
+    renderCart();
+    al.innerHTML = `<span class="badge success">Transaksi tersimpan: ${no}</span>`;
+    init();
+  } catch (err) {
+    al.innerHTML = `<span class="badge danger">Gagal: ${err.message}</span>`;
+  }
+  btn.disabled = false; btn.textContent = '💾 Simpan & Cetak Struk';
+};
+
+function cetakStruk(no, t, bayar, namaPasien, dokter) {
+  const p = profil;
+  document.getElementById('printArea').innerHTML = `
+    <div style="font-family:monospace;max-width:300px;margin:auto;font-size:.85rem">
+      <h3 style="text-align:center">${p.namaApotek || 'Apotek Sehat Selalu'}</h3>
+      <p style="text-align:center">${p.alamat || ''}<br>${p.telepon || ''}</p>
+      <hr>
+      <p>No: ${no}<br>Kasir: ${s.nama}<br>Pasien: ${namaPasien || 'Umum'}${dokter ? '<br>Dokter: ' + dokter : ''}<br>${new Date().toLocaleString('id-ID')}</p>
+      <hr>
+      <table style="font-size:.8rem">${cart.map(c =>
+        `<tr><td>${c.nama}<br>${c.qty} x ${calc.formatRupiah(c.harga)}</td>
+         <td style="text-align:right">${calc.formatRupiah(c.qty * c.harga)}</td></tr>`).join('')}</table>
+      <hr>
+      <p>Subtotal: ${calc.formatRupiah(t.subtotal)}<br>
+         Diskon: ${calc.formatRupiah(t.diskon)}<br>
+         PPN: ${calc.formatRupiah(t.ppn)}<br>
+         <b>TOTAL: ${calc.formatRupiah(t.total)}</b><br>
+         Bayar: ${calc.formatRupiah(bayar)}<br>
+         Kembali: ${calc.formatRupiah(bayar - t.total)}</p>
+      <hr>
+      <p style="text-align:center">${p.footerStruk || 'Terima kasih, semoga lekas sembuh!'}</p>
+    </div>`;
+  window.print();
+}
+</script>
+</body>
+</html>
