@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Login — Apotek Sehat Selalu</title>
+<link rel="stylesheet" href="css/style.css">
+<base target="_blank">
+</head>
+<body class="login-body">
+<div class="login-card">
+  <h1>💊 Apotek Sehat Selalu</h1>
+  <p class="muted" style="margin-bottom:1rem">Sistem Manajemen Apotek — silakan masuk</p>
+  <div id="alert"></div>
+  <div class="field"><label>Email</label><input type="email" id="email" placeholder="anda@apotek.id" autocomplete="username"></div>
+  <div class="field"><label>Password</label><input type="password" id="password" placeholder="••••••••" autocomplete="current-password"></div>
+  <button class="btn btn-primary btn-block" id="btnLogin">Masuk</button>
+  <div id="firstRun" style="display:none;margin-top:1rem">
+    <hr style="margin:.75rem 0;border:none;border-top:1px solid var(--border)">
+    <p class="muted" style="font-size:.85rem;margin-bottom:.5rem">Belum ada pengguna di database. Buat akun <b>Developer</b> pertama:</p>
+    <div class="field"><label>Nama</label><input id="frNama" placeholder="Nama Anda"></div>
+    <div class="field"><label>Password Developer</label><input id="frPass" type="password" placeholder="min. 6 karakter"></div>
+    <button class="btn btn-primary btn-block" id="btnFirstRun">Buat Akun Developer</button>
+    <p class="muted" style="font-size:.75rem;margin-top:.5rem">Login pertama memakai email <b>developer@apotek.id</b></p>
+  </div>
+</div>
+<script type="module">
+import { login, sha256 } from './js/auth.js';
+import { list, add } from './js/db.js';
+
+const showErr = (msg) => document.getElementById('alert').innerHTML =
+  `<div class="badge danger" style="display:block;padding:.6rem;border-radius:8px">${msg}</div>`;
+
+async function doLogin() {
+  try {
+    await login(document.getElementById('email').value, document.getElementById('password').value);
+    location.href = 'index.html';
+  } catch (err) { showErr(err.message); }
+}
+document.getElementById('btnLogin').onclick = doLogin;
+document.getElementById('password').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+
+// Mode first-run: jika collection 'users' masih kosong, izinkan membuat Developer pertama
+(async () => {
+  try {
+    const users = await list('users');
+    if (users.length === 0) {
+      document.getElementById('firstRun').style.display = 'block';
+    } else if (sessionStorage.getItem('apotek_session')) {
+      location.href = 'index.html';
+    }
+  } catch (e) { showErr('Gagal koneksi ke Firestore. Periksa firebase-config.js.'); }
+})();
+
+document.getElementById('btnFirstRun').onclick = async () => {
+  const nama = document.getElementById('frNama').value.trim();
+  const pass = document.getElementById('frPass').value;
+  if (!nama || pass.length < 6) { alert('Nama wajib diisi & password min. 6 karakter.'); return; }
+  await add('users', {
+    nama, email: 'developer@apotek.id',
+    password: await sha256(pass), role: 'developer', aktif: true,
+    dibuat: new Date().toISOString()
+  });
+  alert('Akun Developer dibuat. Login dengan email developer@apotek.id');
+  document.getElementById('firstRun').style.display = 'none';
+};
+</script>
+</body>
+</html>
