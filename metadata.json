@@ -1,0 +1,6 @@
+{
+  "name": "Apotek Hifzi Farma - Sistem Manajemen & Kasir Terpusat",
+  "description": "Sistem Informasi Manajemen Apotek dengan arsitektur terpusat untuk kalkulasi harga, aturan bisnis FEFO, kasir POS, stok batch, dan laporan komprehensif.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
