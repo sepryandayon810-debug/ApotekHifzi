@@ -68,10 +68,10 @@ export default function App() {
   }, [currentUser?.role]);
 
   // If no user is logged in, show the Login Page
-  if (!currentUser) {
-    return <LoginPage onLoginSuccess={() => setActiveMenu('dashboard')} />;
-  }
-
+if (!currentUser) {
+  return <LoginPage onLoginSuccess={() => setActiveMenu('dashboard')} />;
+}
+  
   // Dynamic font class
   const fontClass =
     settings.fontFamily === 'JetBrains Mono'
