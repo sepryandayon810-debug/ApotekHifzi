@@ -285,33 +285,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </button>
         </div>
 
-        {/* Quick Demo Role Switcher (Permasing-masing Rule) */}
-        <div className="mt-3 pt-2.5 border-t border-white/15">
-          <div className="flex items-center justify-between text-[10px] text-emerald-100/90 mb-1.5">
-            <span>Uji Hak Akses Role:</span>
-            <span className="font-mono text-[9px] text-emerald-200">RBAC Terpusat</span>
-          </div>
-          <div className="grid grid-cols-5 gap-1">
-            {(['Administrator', 'Apoteker', 'Kasir', 'Gudang', 'Developer'] as UserRole[]).map((r) => {
-              const isSelected = activeRole === r;
-              return (
-                <button
-                  key={r}
-                  type="button"
-                  onClick={() => switchRole(r)}
-                  className={`py-1 px-0.5 rounded text-[10px] font-bold transition-all truncate text-center ${
-                    isSelected
-                      ? 'bg-white text-slate-900 shadow-xs'
-                      : 'bg-black/25 text-emerald-100 hover:bg-white/20'
-                  }`}
-                  title={`Beralih ke role ${r}`}
-                >
-                  {r === 'Administrator' ? 'Admin' : r === 'Apoteker' ? 'Apt' : r === 'Developer' ? 'Dev' : r}
-                </button>
-              );
-            })}
-          </div>
-        </div>
+       {/* Central Architecture Live Rules Button (Hanya tampil untuk Owner & Developer) */}
+{(activeRole === 'Developer' || activeRole === 'Owner') && (
+  <button
+    onClick={onOpenRuleInspector}
+    className="w-full mt-3 flex items-center justify-between px-3 py-2 rounded-lg bg-emerald-900/60 hover:bg-emerald-900 text-xs text-emerald-100 border border-emerald-500/40 transition-colors shadow-sm"
+  >
+    <div className="flex items-center gap-2">
+      <Sliders className="w-3.5 h-3.5 text-emerald-300" />
+      <span className="font-medium">Rule & Perhitungan Terpusat</span>
+    </div>
+    <span className="text-[10px] bg-emerald-700 px-1.5 py-0.5 rounded text-emerald-100">Live</span>
+  </button>
+)}
 
         {/* Central Architecture Live Rules Button */}
         <button
