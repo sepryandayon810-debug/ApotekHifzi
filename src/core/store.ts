@@ -32,15 +32,36 @@ import { DEFAULT_CENTRAL_RULES, PharmacyRules } from './business-rules';
 import { PharmacyCalculator } from './calculator';
 
 // Initial Seed Users for RBAC Authentication
+// Initial Seed Users for RBAC Authentication (6 Roles: Owner, Dev, Admin, APT, Kasir, Gudang)
 const INITIAL_USERS: AppUser[] = [
   {
+    id: 'usr-owner',
+    name: 'Sepryanda Yon (Owner)',
+    username: 'owner',
+    password: 'owner123',
+    email: 'owner@hifzifarma.com',
+    role: 'Owner',
+    avatarLetter: 'O',
+    isActive: true,
+  },
+  {
+    id: 'usr-dev',
+    name: 'Developer (Super Admin / Engineering)',
+    username: 'dev',
+    password: 'dev123',
+    email: 'developer@hifzifarma.com',
+    role: 'Developer',
+    avatarLetter: 'D',
+    isActive: true,
+  },
+  {
     id: 'usr-admin',
-    name: 'Sepryanda Yon',
+    name: 'Administrator Apotek',
     username: 'admin',
     password: 'admin123',
     email: 'admin@hifzifarma.com',
     role: 'Administrator',
-    avatarLetter: 'S',
+    avatarLetter: 'A',
     isActive: true,
   },
   {
@@ -61,7 +82,7 @@ const INITIAL_USERS: AppUser[] = [
     password: 'kasir123',
     email: 'budi.kasir@hifzifarma.com',
     role: 'Kasir',
-    avatarLetter: 'B',
+    avatarLetter: 'K',
     isActive: true,
   },
   {
@@ -71,17 +92,7 @@ const INITIAL_USERS: AppUser[] = [
     password: 'gudang123',
     email: 'faisal.logistik@hifzifarma.com',
     role: 'Gudang',
-    avatarLetter: 'F',
-    isActive: true,
-  },
-  {
-    id: 'usr-dev',
-    name: 'Developer (Super Admin / Engineering)',
-    username: 'dev',
-    password: 'dev123',
-    email: 'developer@hifzifarma.com',
-    role: 'Developer',
-    avatarLetter: 'D',
+    avatarLetter: 'G',
     isActive: true,
   },
 ];
@@ -624,7 +635,7 @@ type Listener = () => void;
 
 class PharmacyStore {
   private users: AppUser[] = INITIAL_USERS;
-  private currentUser: AppUser | null = INITIAL_USERS[0]; // Default logged-in as Administrator (Sepryanda Yon)
+  private currentUser: AppUser | null = null; // Wajib null agar layar Login tampil saat pertama dibuka
   private products: Product[] = INITIAL_PRODUCTS;
   private suppliers: Supplier[] = INITIAL_SUPPLIERS;
   private doctors: Doctor[] = INITIAL_DOCTORS;
